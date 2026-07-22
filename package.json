@@ -1,0 +1,17 @@
+{
+  "name": "telegram-catbox-bot",
+  "version": "1.0.0",
+  "description": "Bot Telegram untuk upload file ke Catbox.moe",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "axios": "^1.6.8",
+    "form-data": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
