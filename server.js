@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const FormData = require('form-data');
 
-// Token Bot Telegram
+// Token Bot Telegram kamu
 const TOKEN = '8951330077:AAExKbMBCdLaBf9TFflW2jbhiGrGb77ch5s';
 
 const bot = new TelegramBot(TOKEN, { polling: true });
@@ -24,42 +24,71 @@ async function handleFileUpload(msg, fileId, defaultExt = 'jpg') {
   try {
     statusMsg = await bot.sendMessage(chatId, '⏳ Mengunduh file dari Telegram...');
 
-    // 1. Ambil info file dari Telegram
+    // 1. Ambil URL File dari Telegram
     const file = await bot.getFile(fileId);
     const fileUrlTelegram = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
 
     const ext = file.file_path ? file.file_path.split('.').pop() : defaultExt;
     const fileName = `file_${Date.now()}.${ext}`;
 
-    // 2. Download file sebagai ArrayBuffer
+    // 2. Download File ke Buffer
     const responseFile = await axios.get(fileUrlTelegram, {
       responseType: 'arraybuffer'
     });
+
+    const fileBuffer = Buffer.from(responseFile.data);
 
     await bot.editMessageText('📤 Mengunggah ke Catbox.moe...', {
       chat_id: chatId,
       message_id: statusMsg.message_id
     });
 
-    // 3. Susun FormData
+    // 3. Susun FormData Khusus Catbox
     const formData = new FormData();
     formData.append('reqtype', 'fileupload');
-    formData.append('fileToUpload', Buffer.from(responseFile.data), {
+    formData.append('fileToUpload', fileBuffer, {
       filename: fileName,
       contentType: 'application/octet-stream'
     });
 
-    // 4. Kirim ke Catbox dengan Header Browser
-    const catboxRes = await axios.post('https://catbox.moe/user/api.php', formData, {
-      headers: {
-        ...formData.getHeaders(),
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 30000
-    });
+    let fileUrl = '';
 
-    const fileUrl = String(catboxRes.data).trim();
+    try {
+      // Tembak API Catbox.moe
+      const catboxRes = await axios.post('https://catbox.moe/user/api.php', formData, {
+        headers: {
+          ...formData.getHeaders(),
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 20000
+      });
 
+      fileUrl = String(catboxRes.data).trim();
+    } catch (e) {
+      console.log('Catbox gagal, mencoba alternatif Litterbox...');
+    }
+
+    // Jika Catbox memberikan error 'Invalid uploader' atau gagal, gunakan Litterbox (Layanan resmi dari Catbox)
+    if (!fileUrl.startsWith('http')) {
+      const litterFormData = new FormData();
+      litterFormData.append('reqtype', 'fileupload');
+      litterFormData.append('time', '72h'); // Simpan 3 hari
+      litterFormData.append('fileToUpload', fileBuffer, {
+        filename: fileName,
+        contentType: 'application/octet-stream'
+      });
+
+      const litterRes = await axios.post('https://litterbox.catbox.moe/resources/internals/api.php', litterFormData, {
+        headers: {
+          ...litterFormData.getHeaders(),
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
+
+      fileUrl = String(litterRes.data).trim();
+    }
+
+    // 4. Kirim Hasil Link
     if (fileUrl.startsWith('http')) {
       await bot.editMessageText(`✅ **Berhasil Diunggah!**\n\n🔗 **Link File:**\n${fileUrl}`, {
         chat_id: chatId,
@@ -68,15 +97,15 @@ async function handleFileUpload(msg, fileId, defaultExt = 'jpg') {
         disable_web_page_preview: false
       });
     } else {
-      throw new Error(`Respon Catbox: ${fileUrl}`);
+      throw new Error(`Respon Server: ${fileUrl}`);
     }
 
   } catch (error) {
-    console.error('Error detail:', error.response ? error.response.data : error.message);
+    console.error('Error detail:', error.message);
     const errDetail = error.response && error.response.data ? String(error.response.data) : error.message;
     
     if (statusMsg) {
-      bot.editMessageText(`❌ Gagal mengunggah ke Catbox.moe.\n\nDetail Error: \`${errDetail.slice(0, 100)}\``, {
+      bot.editMessageText(`❌ Gagal mengunggah file.\n\nDetail Error: \`${errDetail.slice(0, 100)}\``, {
         chat_id: chatId,
         message_id: statusMsg.message_id,
         parse_mode: 'Markdown'
