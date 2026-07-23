@@ -12,15 +12,14 @@ console.log('Bot Telegram Catbox Uploader aktif...');
 
 // Handler pesan /start
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
   bot.sendMessage(
-    chatId,
+    msg.chat.id,
     '👋 **Halo!** Kirimkan foto, video, audio, atau dokumen, lalu saya akan mengunggahnya ke **Catbox.moe**!',
     { parse_mode: 'Markdown' }
   );
 });
 
-// Fungsi penanganan upload ke Catbox.moe
+// Fungsi utama penanganan upload
 async function handleFileUpload(msg, fileId, defaultExt = 'bin') {
   const chatId = msg.chat.id;
   let statusMsg;
@@ -28,63 +27,58 @@ async function handleFileUpload(msg, fileId, defaultExt = 'bin') {
   try {
     statusMsg = await bot.sendMessage(chatId, '⏳ Memproses file dari Telegram...');
 
-    // 1. Dapatkan info file dan link dari Telegram
-    const file = await bot.getFile(fileId);
-    const fileLink = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+    // 1. Ambil stream file langsung dari Telegram
+    const fileStream = bot.getFileStream(fileId);
 
-    // Tentukan ekstensi & nama file
-    const fileExtension = file.file_path ? file.file_path.split('.').pop() : defaultExt;
-    const fileName = `upload_${Date.now()}.${fileExtension}`;
+    // 2. Dapatkan info nama file/ekstensi dari Telegram jika ada
+    const fileInfo = await bot.getFile(fileId);
+    const ext = fileInfo.file_path ? fileInfo.file_path.split('.').pop() : defaultExt;
+    const fileName = `upload_${Date.now()}.${ext}`;
 
     await bot.editMessageText('📤 Mengunggah file ke Catbox.moe...', {
       chat_id: chatId,
       message_id: statusMsg.message_id
     });
 
-    // 2. Unduh file sebagai ArrayBuffer / Buffer
-    const fileBufferResponse = await axios.get(fileLink, {
-      responseType: 'arraybuffer'
-    });
-
-    // 3. Siapkan Form Data sesuai spesifikasi API Catbox.moe
+    // 3. Buat FormData dan masukkan stream
     const formData = new FormData();
     formData.append('reqtype', 'fileupload');
-    formData.append('fileToUpload', Buffer.from(fileBufferResponse.data), {
-      filename: fileName
+    formData.append('fileToUpload', fileStream, {
+      filename: fileName,
+      knownLength: fileInfo.file_size
     });
 
-    // 4. Kirim ke API Catbox.moe
-    const catboxRes = await axios.post('https://catbox.moe/user/api.php', formData, {
+    // 4. Kirim stream langsung ke Catbox.moe
+    const response = await axios.post('https://catbox.moe/user/api.php', formData, {
       headers: {
         ...formData.getHeaders(),
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-      }
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
     });
 
-    const fileUrl = String(catboxRes.data).trim();
+    const fileUrl = String(response.data).trim();
 
-    // Pastikan respon berupa URL valid Catbox
+    // 5. Cek jika berhasil mendapat URL Catbox
     if (fileUrl.startsWith('http')) {
       await bot.sendMessage(chatId, `✅ **Berhasil Diunggah!**\n\n🔗 **Link File:**\n${fileUrl}`, {
         parse_mode: 'Markdown',
         disable_web_page_preview: false
       });
     } else {
-      throw new Error(`Respon Catbox tidak valid: ${fileUrl}`);
+      throw new Error(`Respon Catbox: ${fileUrl}`);
     }
 
   } catch (error) {
-    console.error('Error upload:', error.response ? error.response.data : error.message);
-    
-    if (statusMsg) {
-      bot.sendMessage(chatId, '❌ Terjadi kesalahan saat mengunggah file ke Catbox.moe.');
-    }
+    console.error('Error detail:', error.message);
+    bot.sendMessage(chatId, '❌ Terjadi kesalahan saat mengunggah file ke Catbox.moe. Pastikan ukuran file tidak melebihi limit (20MB).');
   }
 }
 
-// Event Listeners untuk berbagai tipe media
+// Event handler untuk media
 bot.on('photo', (msg) => {
-  const photo = msg.photo[msg.photo.length - 1]; // Ambil kualitas tertinggi
+  const photo = msg.photo[msg.photo.length - 1]; // foto resolusi tertinggi
   handleFileUpload(msg, photo.file_id, 'jpg');
 });
 
