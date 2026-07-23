@@ -1,132 +1,126 @@
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const FormData = require('form-data');
 
 // Token Bot Telegram kamu
 const TOKEN = '8951330077:AAExKbMBCdLaBf9TFflW2jbhiGrGb77ch5s';
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
-console.log('Bot Telegram Catbox Uploader aktif...');
+console.log('Bot Downloader TikTok & YouTube aktif...');
 
+// Command /start
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    '👋 **Halo!** Kirimkan foto, video, audio, atau dokumen, lalu saya akan mengunggahnya ke **Catbox.moe**!',
+    '👋 **Halo! Selamat datang di Downloader Bot!**\n\n' +
+    'Kirimkan link video **TikTok** atau **YouTube** (Shorts/Video), dan saya akan mengunduhkannya untukmu secara gratis!',
     { parse_mode: 'Markdown' }
   );
 });
 
-async function handleFileUpload(msg, fileId, defaultExt = 'jpg') {
+// Listener untuk pesan berisi teks (Link)
+bot.on('text', async (msg) => {
   const chatId = msg.chat.id;
+  const text = msg.text.trim();
+
+  // Abaikan perintah bawaan bot
+  if (text.startsWith('/')) return;
+
+  // Cek apakah teks berupa link TikTok
+  if (text.includes('tiktok.com')) {
+    await handleTikTok(chatId, text);
+  } 
+  // Cek apakah teks berupa link YouTube
+  else if (text.includes('youtube.com') || text.includes('youtu.be')) {
+    await handleYouTube(chatId, text);
+  } 
+  else {
+    bot.sendMessage(chatId, '❌ Harap kirimkan tautan/link **TikTok** atau **YouTube** yang valid.');
+  }
+});
+
+// --- FUNGSI DOWNLOAD TIKTOK ---
+async function handleTikTok(chatId, url) {
   let statusMsg;
-
   try {
-    statusMsg = await bot.sendMessage(chatId, '⏳ Mengunduh file dari Telegram...');
+    statusMsg = await bot.sendMessage(chatId, '⏳ **Memproses video TikTok...**', { parse_mode: 'Markdown' });
 
-    // 1. Ambil URL File dari Telegram
-    const file = await bot.getFile(fileId);
-    const fileUrlTelegram = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+    // Menggunakan API TikTok Downloader tanpa watermark
+    const apiRes = await axios.get(`https://api.tiklydown.eu.org/api/download?url=${encodeURIComponent(url)}`);
+    const data = apiRes.data;
 
-    const ext = file.file_path ? file.file_path.split('.').pop() : defaultExt;
-    const fileName = `file_${Date.now()}.${ext}`;
-
-    // 2. Download File ke Buffer
-    const responseFile = await axios.get(fileUrlTelegram, {
-      responseType: 'arraybuffer'
-    });
-
-    const fileBuffer = Buffer.from(responseFile.data);
-
-    await bot.editMessageText('📤 Mengunggah ke Catbox.moe...', {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    });
-
-    // 3. Susun FormData Khusus Catbox
-    const formData = new FormData();
-    formData.append('reqtype', 'fileupload');
-    formData.append('fileToUpload', fileBuffer, {
-      filename: fileName,
-      contentType: 'application/octet-stream'
-    });
-
-    let fileUrl = '';
-
-    try {
-      // Tembak API Catbox.moe
-      const catboxRes = await axios.post('https://catbox.moe/user/api.php', formData, {
-        headers: {
-          ...formData.getHeaders(),
-          'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 20000
-      });
-
-      fileUrl = String(catboxRes.data).trim();
-    } catch (e) {
-      console.log('Catbox gagal, mencoba alternatif Litterbox...');
-    }
-
-    // Jika Catbox memberikan error 'Invalid uploader' atau gagal, gunakan Litterbox (Layanan resmi dari Catbox)
-    if (!fileUrl.startsWith('http')) {
-      const litterFormData = new FormData();
-      litterFormData.append('reqtype', 'fileupload');
-      litterFormData.append('time', '72h'); // Simpan 3 hari
-      litterFormData.append('fileToUpload', fileBuffer, {
-        filename: fileName,
-        contentType: 'application/octet-stream'
-      });
-
-      const litterRes = await axios.post('https://litterbox.catbox.moe/resources/internals/api.php', litterFormData, {
-        headers: {
-          ...litterFormData.getHeaders(),
-          'User-Agent': 'Mozilla/5.0'
-        }
-      });
-
-      fileUrl = String(litterRes.data).trim();
-    }
-
-    // 4. Kirim Hasil Link
-    if (fileUrl.startsWith('http')) {
-      await bot.editMessageText(`✅ **Berhasil Diunggah!**\n\n🔗 **Link File:**\n${fileUrl}`, {
-        chat_id: chatId,
-        message_id: statusMsg.message_id,
-        parse_mode: 'Markdown',
-        disable_web_page_preview: false
-      });
-    } else {
-      throw new Error(`Respon Server: ${fileUrl}`);
-    }
-
-  } catch (error) {
-    console.error('Error detail:', error.message);
-    const errDetail = error.response && error.response.data ? String(error.response.data) : error.message;
-    
-    if (statusMsg) {
-      bot.editMessageText(`❌ Gagal mengunggah file.\n\nDetail Error: \`${errDetail.slice(0, 100)}\``, {
+    if (data && data.video && data.video.noWatermark) {
+      await bot.editMessageText('📤 **Mengirim video ke Telegram...**', {
         chat_id: chatId,
         message_id: statusMsg.message_id,
         parse_mode: 'Markdown'
+      });
+
+      // Kirim video langsung ke percakapan Telegram
+      await bot.sendVideo(chatId, data.video.noWatermark, {
+        caption: `✅ **TikTok No Watermark**\n\n📌 **Judul:** ${data.title || 'TikTok Video'}`
+      });
+
+      // Hapus pesan status
+      bot.deleteMessage(chatId, statusMsg.message_id);
+    } else {
+      throw new Error('Video tidak ditemukan atau link tidak valid.');
+    }
+  } catch (error) {
+    console.error('TikTok Error:', error.message);
+    if (statusMsg) {
+      bot.editMessageText('❌ **Gagal mengunduh video TikTok.** Pastikan akun/video tidak di-private.', {
+        chat_id: chatId,
+        message_id: statusMsg.message_id
       });
     }
   }
 }
 
-bot.on('photo', (msg) => {
-  const photo = msg.photo[msg.photo.length - 1];
-  handleFileUpload(msg, photo.file_id, 'jpg');
-});
+// --- FUNGSI DOWNLOAD YOUTUBE ---
+async function handleYouTube(chatId, url) {
+  let statusMsg;
+  try {
+    statusMsg = await bot.sendMessage(chatId, '⏳ **Memproses link YouTube...**', { parse_mode: 'Markdown' });
 
-bot.on('document', (msg) => {
-  handleFileUpload(msg, msg.document.file_id, 'bin');
-});
+    // Menggunakan API Downloader YouTube
+    const apiRes = await axios.get(`https://api.cobalt.tools/api/json`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      data: JSON.stringify({
+        url: url,
+        videoQuality: '720'
+      })
+    });
 
-bot.on('video', (msg) => {
-  handleFileUpload(msg, msg.video.file_id, 'mp4');
-});
+    const data = apiRes.data;
 
-bot.on('audio', (msg) => {
-  handleFileUpload(msg, msg.audio.file_id, 'mp3');
-});
+    if (data && data.url) {
+      await bot.editMessageText('📤 **Mengirim video YouTube...**', {
+        chat_id: chatId,
+        message_id: statusMsg.message_id,
+        parse_mode: 'Markdown'
+      });
+
+      // Kirim video jika ukuran memungkinkan
+      await bot.sendVideo(chatId, data.url, {
+        caption: `✅ **YouTube Downloader**`
+      });
+
+      bot.deleteMessage(chatId, statusMsg.message_id);
+    } else {
+      throw new Error('Gagal mendapatkan link media YouTube.');
+    }
+  } catch (error) {
+    console.error('YouTube Error:', error.message);
+    if (statusMsg) {
+      bot.editMessageText('❌ **Gagal mengunduh video YouTube.** Coba gunakan link YouTube Shorts atau video berdurasi pendek.', {
+        chat_id: chatId,
+        message_id: statusMsg.message_id
+      });
+    }
+  }
+}
